@@ -73,9 +73,12 @@ def build(args):
         m = Mamba3Model(cfg)
         m.num_parameters = lambda: {"total": sum(q.numel() for q in m.parameters())}
         return m, cfg
-    kw = dict(d=args.d, p=args.p, R=args.R, vocab_size=256, w_scale=args.w_scale)
+    kw = dict(d=args.d, p=args.p, R=args.R, vocab_size=256, w_scale=args.w_scale,
+              r_min=args.r_min, r_max=args.r_max)
     if args.model == "model1":
-        kw.update(tied=not args.untied, use_wv=args.use_wv)
+        kw.update(tied=not args.untied, use_wv=args.use_wv,
+                  use_silu_wo=args.use_silu_wo, use_bias=args.use_bias,
+                  unitary=args.unitary, read_norm=args.read_norm)
     if args.model == "model1":
         cfg = Model1Config(**kw)
         return Model1(cfg), cfg
@@ -94,6 +97,12 @@ def main():
     ap.add_argument("--rope-fraction", type=float, default=0.5)
     ap.add_argument("--untied", action="store_true")
     ap.add_argument("--use-wv", action="store_true")
+    ap.add_argument("--use-silu-wo", action="store_true")
+    ap.add_argument("--use-bias", action="store_true")
+    ap.add_argument("--unitary", action="store_true")
+    ap.add_argument("--read-norm", action="store_true")
+    ap.add_argument("--r-min", type=float, default=0.90)
+    ap.add_argument("--r-max", type=float, default=0.999)
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--p", type=int, default=64)
     ap.add_argument("--R", type=int, default=4)
@@ -107,6 +116,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--log-every", type=int, default=500)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--save", default=None)
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -180,6 +190,8 @@ def main():
                 break
 
     print(f"\n최저 val bits-per-byte = {best:.4f}   (균등 분포 = 8.0)")
+    if args.save:
+        torch.save({"state": model.state_dict(), "cfg": cfg, "args": vars(args)}, args.save)
     if args.out:
         json.dump({"args": vars(args), "hist": hist, "best_bpb": best}, open(args.out, "w"), indent=2)
 

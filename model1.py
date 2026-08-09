@@ -56,6 +56,14 @@ class Model1Config(Model0Config):
     use_wv: bool = False  # value 사영 W_V. span{h} 제약을 풀고 '재표현'을 가능하게 한다
     use_silu_wo: bool = False  # A·V 뒤에 SiLU + W_O. 사이에 비선형이 있어야 W_O 가
     # W_V 와 합쳐지지 않는다 (없으면 f = A h (W_V W_O) 로 d² 자유도에 2d² 파라미터)
+    unitary: bool = False  # α=0, γ=1 → |U_t|=1. 감쇠 없는 무손실 중첩(초기구상 QM§2,3)
+    read_norm: bool = False  # 읽기 시점에 √(누적 쓰기 에너지) 로 나눈다.
+    # ‖S_t‖²_F 의 대각 성분 Σ_{n≤t}‖k_n‖²‖h_n‖² 는 정확히 cumsum 이라 스캔 선형성을
+    # 깨지 않는다. 비대각(간섭)항은 무상관 입력에서 0 으로 평균된다.
+    # 정렬 입력 O(t)/O(√t)=O(√t), 비상관 O(√t)/O(√t)=O(1) → 선택성 유지.
+    use_bias: bool = False  # z 에 복소 바이어스 b. 커널에 상수·1차 경로가 생겨
+    # 3차 동차성이 깨진다 (Yu & Erichson 2025: B 바이어스가 보편근사를 준다는 결과를
+    # Mamba-3 §3.4 가 인용). q,k 가 여전히 e^{-iψ} 의 그래프라 라그랑지안은 보존된다.
     gamma_split: bool = True  # γ 를 q,k 에 √γ 씩 배분 → (q,k) 가 라그랑지안 그래프.
     # 커널은 곱 q̄k 만 보므로 함수는 불변(실측 1.7e-16). 기하학적 정합성만 얻는다.
 
@@ -85,8 +93,20 @@ class DrivenComplexLinearAttention(nn.Module):
 
         # --- 구동 항 (Model 0 대비 추가되는 전부) ---
         self.W_theta = nn.Parameter(torch.randn(p, d) / math.sqrt(d))
+        # read_gain: 초기값을 t=1 의 기대 read_scale 로 두어 무정규화 모델과 스케일 일치
+        self.read_gain = nn.Parameter(
+            torch.tensor(cfg.w_scale * math.sqrt(p * d)) if cfg.read_norm
+            else torch.tensor(1.0)
+        )
         self.s_raw = nn.Parameter(torch.empty(p).uniform_(0.0, cfg.s_max))
         self.gate_bias = nn.Parameter(torch.full((p,), cfg.gate_bias_init))
+
+        # z 바이어스. 0 초기화 → 학습 시작 시점에는 바이어스 없는 모델과 정확히 동일.
+        if cfg.use_bias:
+            self.b_re = nn.Parameter(torch.zeros(p))
+            self.b_im = nn.Parameter(torch.zeros(p))
+        else:
+            self.b_re = self.b_im = None
 
         # value 사영. 없으면 블록 출력이 span{h_1..h_t} 안에 갇힌다 (대화내역2 §8).
         self.W_V = (
@@ -99,11 +119,13 @@ class DrivenComplexLinearAttention(nn.Module):
     # ------------------------------------------------------------------ #
     @property
     def alpha(self) -> Tensor:
+        if self.cfg.unitary:
+            return torch.zeros_like(self.alpha_log)
         return torch.exp(self.alpha_log)
 
     @property
     def gamma(self) -> Tensor:
-        if not self.cfg.use_gamma:
+        if self.cfg.unitary or not self.cfg.use_gamma:
             return torch.ones_like(self.alpha)
         return torch.sqrt(-torch.expm1(-2.0 * self.alpha))
 
@@ -130,9 +152,16 @@ class DrivenComplexLinearAttention(nn.Module):
         Phi = torch.cumsum(omega.double(), dim=1)
         return torch.remainder(Phi, 2 * math.pi).to(omega.dtype)
 
+    def read_scale(self, h: Tensor, k: Tensor) -> Tensor:
+        """√(eps + Σ_{n≤t} ‖k_n‖²‖h_n‖²) — (B,T,1). 상태에 써넣은 누적 에너지."""
+        e = (k.abs() ** 2).sum(-1) * (h ** 2).sum(-1)  # (B,T)
+        return torch.sqrt(1e-8 + torch.cumsum(e, dim=1)).unsqueeze(-1)
+
     def project(self, h: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         W = torch.complex(self.W_re, self.W_im)
         z = torch.einsum("btd,pd->btp", h.to(W.dtype), W)
+        if self.b_re is not None:
+            z = z + torch.complex(self.b_re, self.b_im)
         half = 0.5 * self.psi
         rot = torch.polar(torch.ones_like(half), half)
         if self.cfg.gamma_split:
@@ -191,7 +220,10 @@ class DrivenComplexLinearAttention(nn.Module):
             )  # (B,T,T,c)
             A = A + (inner * decay).sum(-1)
 
-        return A * causal.to(A.dtype) / math.sqrt(p)
+        A = A * causal.to(A.dtype) / math.sqrt(p)
+        if self.cfg.read_norm:
+            A = A * (self.read_gain / self.read_scale(h, k))
+        return A
 
     def _forward_recurrent(self, h: Tensor) -> Tensor:
         _, q, k = self.project(h)
@@ -199,15 +231,21 @@ class DrivenComplexLinearAttention(nn.Module):
         B, T, p = q.shape
         d = h.shape[-1]
 
-        hc = h.to(q.dtype)
-        S = q.new_zeros(B, p, d)
+        v = h if self.W_V is None else h @ self.W_V
+        hc = v.to(q.dtype)
+        S = q.new_zeros(B, p, v.shape[-1])
         alpha = self.alpha[None, :, None]
         out = []
         for t in range(T):
             U = torch.polar(torch.exp(-alpha).expand(B, p, 1), omega[:, t].unsqueeze(-1))
             S = U * S + k[:, t].unsqueeze(-1) * hc[:, t].unsqueeze(1)
             out.append((q[:, t].conj().unsqueeze(-1) * S).sum(1).real)
-        return torch.stack(out, dim=1) / math.sqrt(p)
+        f = torch.stack(out, dim=1) / math.sqrt(p)
+        if self.cfg.read_norm:
+            f = f * (self.read_gain / self.read_scale(h, k))
+        if self.W_O is not None:
+            f = torch.nn.functional.silu(f) @ self.W_O
+        return f
 
 
 class Model1(nn.Module):
