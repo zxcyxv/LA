@@ -78,7 +78,7 @@ def build(args):
     if args.model == "model1":
         kw.update(tied=not args.untied, use_wv=args.use_wv,
                   use_silu_wo=args.use_silu_wo, use_bias=args.use_bias,
-                  unitary=args.unitary, read_norm=args.read_norm)
+                  unitary=args.unitary, read_norm=args.read_norm, polar=args.polar)
     if args.model == "model1":
         cfg = Model1Config(**kw)
         return Model1(cfg), cfg
@@ -99,6 +99,7 @@ def main():
     ap.add_argument("--use-wv", action="store_true")
     ap.add_argument("--use-silu-wo", action="store_true")
     ap.add_argument("--use-bias", action="store_true")
+    ap.add_argument("--polar", action="store_true")
     ap.add_argument("--unitary", action="store_true")
     ap.add_argument("--read-norm", action="store_true")
     ap.add_argument("--r-min", type=float, default=0.90)

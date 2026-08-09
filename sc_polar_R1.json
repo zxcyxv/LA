@@ -1,0 +1,48 @@
+{
+  "args": {
+    "model": "model1",
+    "phase_gate": "sigmoid",
+    "gate_bias": -2.0,
+    "polar": true,
+    "use_wv": false,
+    "task": "select",
+    "n_mem": 4,
+    "n_mem_min": null,
+    "l_noise": 32,
+    "n_data": 16,
+    "d": 128,
+    "p": 64,
+    "R": 1,
+    "w_scale": 0.5,
+    "r_min": 0.9,
+    "r_max": 0.999,
+    "steps": 8000,
+    "batch": 64,
+    "lr": 0.003,
+    "clip": 1.0,
+    "seed": 0,
+    "log_every": 4000,
+    "out": "sc_polar_R1.json",
+    "save": null
+  },
+  "hist": [
+    {
+      "step": 1,
+      "loss": 2.9163644313812256,
+      "tok_acc": 0.0,
+      "seq_acc": 0.0
+    },
+    {
+      "step": 4000,
+      "loss": 6.7520673496801464e-09,
+      "tok_acc": 1.0,
+      "seq_acc": 1.0
+    },
+    {
+      "step": 8000,
+      "loss": 1.5133981845494304e-09,
+      "tok_acc": 1.0,
+      "seq_acc": 1.0
+    }
+  ]
+}

@@ -56,6 +56,10 @@ class Model1Config(Model0Config):
     use_wv: bool = False  # value 사영 W_V. span{h} 제약을 풀고 '재표현'을 가능하게 한다
     use_silu_wo: bool = False  # A·V 뒤에 SiLU + W_O. 사이에 비선형이 있어야 W_O 가
     # W_V 와 합쳐지지 않는다 (없으면 f = A h (W_V W_O) 로 d² 자유도에 2d² 파라미터)
+    polar: bool = False  # 극좌표 사영: z = (W_R h) ⊙ e^{i W_φ h}, W_R·W_φ 는 실수.
+    # 진폭이 실수이므로 고정 토큰의 사영 상 {a⊙e^{iφ}: a∈R^p} 가 라그랑지안 부분공간이
+    # 된다 (<q,q'> = Σ a_j a'_j 실수 → ω≡0). 초기구상의 구조를 되살리되 φ 를 입력
+    # 의존으로 두어 토큰별 라그랑지안을 갖는다. 파라미터 수는 복소 W_C 와 동일(2pd).
     unitary: bool = False  # α=0, γ=1 → |U_t|=1. 감쇠 없는 무손실 중첩(초기구상 QM§2,3)
     read_norm: bool = False  # 읽기 시점에 √(누적 쓰기 에너지) 로 나눈다.
     # ‖S_t‖²_F 의 대각 성분 Σ_{n≤t}‖k_n‖²‖h_n‖² 는 정확히 cumsum 이라 스캔 선형성을
@@ -77,8 +81,15 @@ class DrivenComplexLinearAttention(nn.Module):
         d, p = cfg.d, cfg.p
 
         std = cfg.w_scale / math.sqrt(2.0 * d)
-        self.W_re = nn.Parameter(torch.randn(p, d) * std)
-        self.W_im = nn.Parameter(torch.randn(p, d) * std)
+        if cfg.polar:
+            # 진폭(실수) 과 위상을 분리. 파라미터 수는 복소 W_C 와 같다.
+            self.W_R = nn.Parameter(torch.randn(p, d) * (std * math.sqrt(2.0)))
+            self.W_phi = nn.Parameter(torch.randn(p, d) / math.sqrt(d))
+            self.W_re = self.W_im = None
+        else:
+            self.W_re = nn.Parameter(torch.randn(p, d) * std)
+            self.W_im = nn.Parameter(torch.randn(p, d) * std)
+            self.W_R = self.W_phi = None
 
         mag = torch.empty(p).uniform_(cfg.r_min, cfg.r_max)
         self.alpha_log = nn.Parameter(torch.log(-torch.log(mag)))
@@ -158,8 +169,14 @@ class DrivenComplexLinearAttention(nn.Module):
         return torch.sqrt(1e-8 + torch.cumsum(e, dim=1)).unsqueeze(-1)
 
     def project(self, h: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        W = torch.complex(self.W_re, self.W_im)
-        z = torch.einsum("btd,pd->btp", h.to(W.dtype), W)
+        if self.cfg.polar:
+            amp = torch.einsum("btd,pd->btp", h, self.W_R)          # 실수 진폭
+            phi = torch.einsum("btd,pd->btp", h, self.W_phi)        # 입력 의존 위상
+            z = amp.to(torch.complex64 if h.dtype == torch.float32 else torch.complex128)
+            z = z * torch.polar(torch.ones_like(phi), phi)
+        else:
+            W = torch.complex(self.W_re, self.W_im)
+            z = torch.einsum("btd,pd->btp", h.to(W.dtype), W)
         if self.b_re is not None:
             z = z + torch.complex(self.b_re, self.b_im)
         half = 0.5 * self.psi

@@ -68,7 +68,8 @@ def build(args, task: TaskConfig):
         r_max=args.r_max,
     )
     if args.model == "model1":
-        mcfg = Model1Config(**kw, phase_gate=args.phase_gate, gate_bias_init=args.gate_bias)
+        mcfg = Model1Config(**kw, phase_gate=args.phase_gate, gate_bias_init=args.gate_bias,
+                            polar=args.polar, use_wv=args.use_wv)
         return Model1(mcfg), mcfg
     mcfg = Model0Config(**kw)
     if args.model == "model0":
@@ -81,6 +82,8 @@ def main():
     ap.add_argument("--model", default="model0", choices=["model0", "model1", "attn"])
     ap.add_argument("--phase-gate", default="sigmoid", choices=["sigmoid", "softplus"])
     ap.add_argument("--gate-bias", type=float, default=-2.0)
+    ap.add_argument("--polar", action="store_true")
+    ap.add_argument("--use-wv", action="store_true")
     ap.add_argument("--task", default="select", choices=["select", "fixed"])
     ap.add_argument("--n-mem", type=int, default=4)
     ap.add_argument("--n-mem-min", type=int, default=None, help="설정 시 N 이 샘플마다 가변")
