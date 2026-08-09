@@ -1,0 +1,122 @@
+
+## Unitary Transition SSM Forward Pass
+
+### 1. Complex Projection
+$$q_t = (x_t W_Q) e^{i\phi_q}$$
+$$k_t = (x_t W_K) e^{i\phi_k}$$
+$$v_t = x_t W_V$$
+
+* $x_t \in \mathbb{R}^{d_{model}}$: 시점 $t$의 입력 벡터
+* $W_Q, W_K, W_V \in \mathbb{R}^{d_{model} \times d}$: Query, Key, Value 프로젝션 가중치 행렬
+* $\phi_q, \phi_k \in \mathbb{R}^d$: 토큰의 의미론적(Semantic) 위상 벡터
+* $q_t, k_t \in \mathbb{C}^d$: 복소 공간상의 Query, Key 벡터
+* $v_t \in \mathbb{R}^d$: Value 벡터
+
+---
+
+### 2. State Transition & Superposition
+$$S_t = e^{-i\theta} \odot S_{t-1} + k_t v_t^\dagger$$
+
+* $S_t \in \mathbb{C}^{d \times d}$: 시점 $t$의 거시 상태 행렬 (모든 과거 정보가 압축·중첩된 상태)
+* $e^{-i\theta} \in \mathbb{C}^d$: 채널별 고유 회전 각도 $\theta$를 포함하는 복소 전이 연산자
+* $\odot$: 채널별(행/열 단위) Hadamard Product (전이 회전 적용)
+* $k_t v_t^\dagger \in \mathbb{C}^{d \times d}$: 시점 $t$에 새롭게 주입되는 Key와 Value의 외적(Outer Product) 텐서
+
+---
+
+### 3. Parallel Expansion (Training Phase)
+$$S_t = \sum_{n=1}^t e^{-i(t-n)\theta} \odot (k_n v_n^\dagger)$$
+
+* $n$: 과거 시점 인덱스 ($1 \le n \le t$)
+* $(t-n)\theta$: 시점 $n$의 정보가 현재 시점 $t$까지 누적되어 회전한 상대 위상 각도
+* Associative Property에 의해 GPU상에서 Parallel Prefix Scan($O(\log N)$)으로 일괄 연산 가능
+
+---
+
+### 4. Measurement & Output
+$$o_t = \text{Re}(q_t^\dagger S_t) = \sum_{n=1}^t |q_t||k_n| \cos\Big( \phi_q - \phi_k - (t-n)\theta \Big) v_n^\dagger$$
+
+* $o_t \in \mathbb{R}^d$: 시점 $t$의 최종 관측 출력 벡터
+* $q_t^\dagger$: 복소 켤레 전치(Hermitian Transpose) 관측 연산자
+* $\text{Re}(\cdot)$: 복소 내적 결과값의 실수부 추출 함수
+* $\cos(\cdot)$: 의미적 위상차와 시간 회전각이 합성되어 형성되는 내적 가중치 스칼라
+
+
+
+## Quantum Mechanical Interpretation of the Model
+
+
+
+### 1. Hilbert Space Mapping (상태 공간 사상)
+
+* **Mathematical Definition**:
+
+* $\mathcal{H}_K, \mathcal{H}_V \cong \mathbb{C}^d$ (힐베르트 공간)
+
+* $|k_t\rangle \in \mathcal{H}_K, \quad \langle v_t| \in \mathcal{H}_V^*$
+
+* **Interpretation**:
+
+* 입력 벡터는 복소 힐베르트 공간 $\mathcal{H}$ 위의 상태 벡터(State Vector)로 매핑됨.
+
+* 거시 상태 $S_t \in \mathcal{H}_K \otimes \mathcal{H}_V^*$는 계(System) 전체의 상태 연산자(State Operator) 또는 밀도 행렬(Density Matrix)에 대응함.
+
+
+
+---
+
+
+
+### 2. Time Evolution & Stone's Theorem (시간 진화와 유니터리성)
+
+* **Mathematical Definition**:
+
+* $\hat{U}(\theta) = \exp(-i\theta \hat{H}), \quad \hat{H} = \hat{H}^\dagger$
+
+* $S_t = \hat{U}(\theta) S_{t-1} + |k_t\rangle \langle v_t|$
+
+* **Interpretation**:
+
+* 전이 연산자 $e^{-i\theta}$는 에르미트 해밀토니안 $\hat{H}$에 의해 생성되는 유니터리 연산자(Unitary Operator)임.
+
+* 스톤의 정리(Stone's Theorem)에 의해, 감쇠 계수($\gamma=1$)가 없는 진화는 닫힌 양자계(Closed Quantum System)의 유니터리 시간 진동(Unitary Time Evolution)을 따름.
+
+* 상태의 프로베니우스 놈(Frobenius Norm)이 보존되어 과거 정보의 에너지가 영구히 유실되지 않음.
+
+
+
+---
+
+
+
+### 3. Superposition Principle (중첩 원리)
+
+* **Mathematical Definition**:
+
+* $S_t = \sum_{n=1}^t \hat{U}^{t-n} |k_n\rangle \langle v_n|$
+
+* **Interpretation**:
+
+* 과거 $1$부터 $t$까지의 모든 입력이 소실되거나 단일 벡터로 압축되지 않고, 유니터리 변환된 상태들의 선형 중첩(Linear Superposition) 상태로 $S_t$ 내에 공존함.
+
+
+
+---
+
+
+
+### 4. Projective Measurement & Quantum Interference (투영 관측과 양자 간섭)
+
+* **Mathematical Definition**:
+
+* $o_t = \text{Re}(\langle q_t | S_t) = \sum_{n=1}^t |q_t||k_n| \cos\Big( \Delta\Phi_n \Big) \langle v_n|$
+
+* $\Delta\Phi_n = (\phi_q - \phi_k) - (t-n)\theta$
+
+* **Interpretation**:
+
+* 관측 연산자 $\langle q_t |$를 통한 내적 연산은 양자역학의 투영 관측(Projective Measurement) 및 호모다인 검출(Homodyne Detection)과 대수적으로 동일함.
+
+* **Destructive Interference (상쇄 간섭)**: 쿼리와 무관한 토큰은 위상 $\Delta\Phi_n$이 무작위 분포를 이루며 $\cos(\Delta\Phi_n)$의 진동에 의해 대수적으로 소거됨 ($\sum \approx 0$).
+
+* **Constructive Interference (보강 간섭)**: 쿼리와 호응하는 토큰은 위상 정류점(Stationary Phase Condition, $\Delta\Phi_n \approx 0$)을 형성하여 코사인 스칼라가 $1$로 극대화되어 복원됨.

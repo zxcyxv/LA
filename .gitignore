@@ -1,0 +1,19 @@
+# 실험 산출물 (재현 가능하므로 추적하지 않음)
+log_*.txt
+run_*.json
+lm_*.json
+lm2_*.json
+lm3_*.json
+bm_*.json
+ab_*.json
+*.pt
+*.npy
+
+# 캐시
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.cache/
+
+# 제3자 논문 PDF (재배포하지 않음)
+*.pdf
