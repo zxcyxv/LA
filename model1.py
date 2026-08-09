@@ -53,7 +53,11 @@ class Model1Config(Model0Config):
     gate_bias_init: float = -2.0  # 초기 게이트 개방도 (≈0.12)
     driven: bool = True  # False 면 Δθ≡0 → Model 0 과 정확히 동일
     tied: bool = True  # False 면 R 개 블록을 독립 파라미터로 (깊이 용량 분리)
-    use_wv: bool = False  # True 면 W_V, W_O 추가 (span{h} 제약 해제)
+    use_wv: bool = False  # value 사영 W_V. span{h} 제약을 풀고 '재표현'을 가능하게 한다
+    use_silu_wo: bool = False  # A·V 뒤에 SiLU + W_O. 사이에 비선형이 있어야 W_O 가
+    # W_V 와 합쳐지지 않는다 (없으면 f = A h (W_V W_O) 로 d² 자유도에 2d² 파라미터)
+    gamma_split: bool = True  # γ 를 q,k 에 √γ 씩 배분 → (q,k) 가 라그랑지안 그래프.
+    # 커널은 곱 q̄k 만 보므로 함수는 불변(실측 1.7e-16). 기하학적 정합성만 얻는다.
 
 
 class DrivenComplexLinearAttention(nn.Module):
@@ -85,11 +89,12 @@ class DrivenComplexLinearAttention(nn.Module):
         self.gate_bias = nn.Parameter(torch.full((p,), cfg.gate_bias_init))
 
         # value 사영. 없으면 블록 출력이 span{h_1..h_t} 안에 갇힌다 (대화내역2 §8).
-        if cfg.use_wv:
-            self.W_V = nn.Parameter(torch.randn(d, d) / math.sqrt(d))
-            self.W_O = nn.Parameter(torch.randn(d, d) / math.sqrt(d))
-        else:
-            self.W_V = self.W_O = None
+        self.W_V = (
+            nn.Parameter(torch.randn(d, d) / math.sqrt(d)) if cfg.use_wv else None
+        )
+        self.W_O = (
+            nn.Parameter(torch.randn(d, d) / math.sqrt(d)) if cfg.use_silu_wo else None
+        )
 
     # ------------------------------------------------------------------ #
     @property
@@ -130,8 +135,15 @@ class DrivenComplexLinearAttention(nn.Module):
         z = torch.einsum("btd,pd->btp", h.to(W.dtype), W)
         half = 0.5 * self.psi
         rot = torch.polar(torch.ones_like(half), half)
-        q = z * rot
-        k = z * rot.conj() * self.gamma.to(z.dtype)
+        if self.cfg.gamma_split:
+            # γ 를 √γ 씩 나눠 걸면 (q,k) 가 심플렉토모피즘의 그래프가 되어
+            # (ω⊖ω) 가 정확히 0 이 된다. 커널은 곱 q̄k 만 보므로 함수는 불변.
+            g = torch.sqrt(self.gamma).to(z.dtype)
+            q = z * rot * g
+            k = z * rot.conj() * g
+        else:
+            q = z * rot
+            k = z * rot.conj() * self.gamma.to(z.dtype)
         return z, q, k
 
     # ------------------------------------------------------------------ #
@@ -141,7 +153,7 @@ class DrivenComplexLinearAttention(nn.Module):
             v = h if self.W_V is None else h @ self.W_V
             f = torch.einsum("btn,bnd->btd", A, v)
             if self.W_O is not None:
-                f = f @ self.W_O
+                f = torch.nn.functional.silu(f) @ self.W_O
             return (f, A) if return_A else f
         if mode == "recurrent":
             if return_A:
