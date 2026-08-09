@@ -6,6 +6,10 @@
 
 전체 실험 기록과 결론은 **[RESULTS.md](RESULTS.md)** 참조.
 
+문서: [RESULTS.md](RESULTS.md) 전체 기록 · [EXTRAPOLATION.md](EXTRAPOLATION.md) 길이 외삽 ·
+[CAPACITY.md](CAPACITY.md) 용량 · [EXCITABILITY.md](EXCITABILITY.md) 흥분성 ·
+[PLASTICITY.md](PLASTICITY.md) 가소성/STDP · [FIELDS_REVIEW.md](FIELDS_REVIEW.md) 라그랑지안 검토
+
 ## 핵심 결과 요약
 
 | | Model 0 (LTI 전이) | **Model 1 (구동 해밀토니안)** |

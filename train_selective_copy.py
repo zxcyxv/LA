@@ -20,6 +20,8 @@ import time
 
 import torch
 import torch.nn as nn
+from dataclasses import replace as _replace
+import random as _random
 
 from model0 import Model0, Model0Config, dirichlet_energy, euler_gain
 from model1 import Model1, Model1Config
@@ -69,7 +71,9 @@ def build(args, task: TaskConfig):
     )
     if args.model == "model1":
         mcfg = Model1Config(**kw, phase_gate=args.phase_gate, gate_bias_init=args.gate_bias,
-                            polar=args.polar, use_wv=args.use_wv)
+                            polar=args.polar, use_wv=args.use_wv,
+                            use_delta=args.use_delta, unitary=args.unitary,
+                            decay_init=args.decay_init, ordinal_only=args.ordinal_only)
         return Model1(mcfg), mcfg
     mcfg = Model0Config(**kw)
     if args.model == "model0":
@@ -80,14 +84,22 @@ def build(args, task: TaskConfig):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="model0", choices=["model0", "model1", "attn"])
-    ap.add_argument("--phase-gate", default="sigmoid", choices=["sigmoid", "softplus"])
+    ap.add_argument("--phase-gate", default="sigmoid", choices=["sigmoid", "softplus", "hard"])
     ap.add_argument("--gate-bias", type=float, default=-2.0)
+    ap.add_argument("--ordinal-only", action="store_true",
+                    help="θ:=0 고정. 위치 위상 제거, 내용 주소만으로 학습")
+    ap.add_argument("--decay-init", default="uniform", choices=["uniform", "logtau"],
+                    help="감쇠 초기화. logtau = 시간척도 로그 균등 (긴 척도 채널 확보)")
     ap.add_argument("--polar", action="store_true")
     ap.add_argument("--use-wv", action="store_true")
+    ap.add_argument("--use-delta", action="store_true")
+    ap.add_argument("--unitary", action="store_true")
     ap.add_argument("--task", default="select", choices=["select", "fixed"])
     ap.add_argument("--n-mem", type=int, default=4)
     ap.add_argument("--n-mem-min", type=int, default=None, help="설정 시 N 이 샘플마다 가변")
     ap.add_argument("--l-noise", type=int, default=32)
+    ap.add_argument("--l-noise-min", type=int, default=None,
+                    help="설정 시 배치마다 l_noise ~ U[min, l_noise] 로 랜덤")
     ap.add_argument("--n-data", type=int, default=16)
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--p", type=int, default=64)
@@ -132,9 +144,12 @@ def main():
     t0 = time.time()
     best = 0.0
     for step in range(1, args.steps + 1):
-        x, y = make_batch(task, args.batch, dev)
+        # 길이 랜덤화: 위상 잔차 ω(blank) 를 0 으로 밀 압력을 만든다
+        tb = task if args.l_noise_min is None else _replace(
+            task, l_noise=_random.randint(args.l_noise_min, args.l_noise))
+        x, y = make_batch(tb, args.batch, dev)
         logits = model(x)
-        loss = loss_fn(logits, task, y)
+        loss = loss_fn(logits, tb, y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip).item()

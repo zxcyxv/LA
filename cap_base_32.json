@@ -1,0 +1,62 @@
+{
+  "args": {
+    "model": "model1",
+    "phase_gate": "sigmoid",
+    "gate_bias": -2.0,
+    "polar": false,
+    "use_wv": false,
+    "use_delta": false,
+    "unitary": false,
+    "task": "select",
+    "n_mem": 32,
+    "n_mem_min": null,
+    "l_noise": 48,
+    "n_data": 16,
+    "d": 64,
+    "p": 16,
+    "R": 2,
+    "w_scale": 0.5,
+    "r_min": 0.9,
+    "r_max": 0.999,
+    "steps": 4000,
+    "batch": 64,
+    "lr": 0.003,
+    "clip": 1.0,
+    "seed": 0,
+    "log_every": 1000,
+    "out": "cap_base_32.json",
+    "save": null
+  },
+  "hist": [
+    {
+      "step": 1,
+      "loss": 2.9970242977142334,
+      "tok_acc": 0.0,
+      "seq_acc": 0.0
+    },
+    {
+      "step": 1000,
+      "loss": 0.9446350932121277,
+      "tok_acc": 0.71990966796875,
+      "seq_acc": 0.0
+    },
+    {
+      "step": 2000,
+      "loss": 0.4641490578651428,
+      "tok_acc": 0.87200927734375,
+      "seq_acc": 0.017578125
+    },
+    {
+      "step": 3000,
+      "loss": 0.3376438021659851,
+      "tok_acc": 0.90679931640625,
+      "seq_acc": 0.0703125
+    },
+    {
+      "step": 4000,
+      "loss": 0.30659085512161255,
+      "tok_acc": 0.912841796875,
+      "seq_acc": 0.080078125
+    }
+  ]
+}

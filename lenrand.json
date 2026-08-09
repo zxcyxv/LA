@@ -1,0 +1,51 @@
+{
+  "args": {
+    "model": "model1",
+    "phase_gate": "sigmoid",
+    "gate_bias": -2.0,
+    "polar": false,
+    "use_wv": false,
+    "use_delta": false,
+    "unitary": false,
+    "task": "select",
+    "n_mem": 4,
+    "n_mem_min": null,
+    "l_noise": 64,
+    "l_noise_min": 16,
+    "n_data": 16,
+    "d": 128,
+    "p": 64,
+    "R": 4,
+    "w_scale": 0.5,
+    "r_min": 0.9,
+    "r_max": 0.999,
+    "steps": 8000,
+    "batch": 64,
+    "lr": 0.003,
+    "clip": 1.0,
+    "seed": 0,
+    "log_every": 4000,
+    "out": "lenrand.json",
+    "save": "ckpt_lenrand.pt"
+  },
+  "hist": [
+    {
+      "step": 1,
+      "loss": 2.915675163269043,
+      "tok_acc": 0.0,
+      "seq_acc": 0.0
+    },
+    {
+      "step": 4000,
+      "loss": 0.06566263735294342,
+      "tok_acc": 0.978515625,
+      "seq_acc": 0.92578125
+    },
+    {
+      "step": 8000,
+      "loss": 0.0003131271223537624,
+      "tok_acc": 1.0,
+      "seq_acc": 1.0
+    }
+  ]
+}

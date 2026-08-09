@@ -64,6 +64,10 @@ def make_batch(cfg: TaskConfig, batch: int, device="cpu", generator=None) -> tup
 
     y[b,i] 는 x 의 위치 l_noise+i (i 번째 마커) 에서 예측해야 할 토큰이다.
     """
+    # n_mem 개를 l_noise 칸에 겹치지 않게 놓아야 한다. 넘으면 argsort 가 조용히
+    # 잘린 위치를 돌려주어 '풀 수 없는' 과제가 만들어진다 (실제로 한 번 겪었다).
+    assert cfg.n_mem <= cfg.l_noise, (
+        f"n_mem({cfg.n_mem}) > l_noise({cfg.l_noise}): 놓을 자리가 없다")
     g = generator
     x = torch.full((batch, cfg.l_noise), BLANK, dtype=torch.long, device=device)
 

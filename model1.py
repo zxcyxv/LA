@@ -48,7 +48,12 @@ from model0 import Model0Config, dirichlet_energy, euler_gain, spectral_gain  # 
 
 @dataclass
 class Model1Config(Model0Config):
-    phase_gate: str = "sigmoid"  # "sigmoid" | "softplus"
+    phase_gate: str = "sigmoid"  # "sigmoid" | "softplus" | "hard"
+    # "hard" = clamp(logit,0,1). 로짓 ≤0 에서 **정확히 0** 이므로 ω(blank)=0 이
+    # 유한 파라미터로 도달 가능하다. sigmoid 는 -∞ 가 필요해 잔차가 남는다.
+    ordinal_only: bool = False  # θ:=0 고정. 위치 위상을 없애고 순수 '내용 주소' 만 남긴다.
+    # ω = s·gate(h) 이므로 Φ 는 '지금까지 센 토큰 수' 가 되고 주소가 길이에 불변이 된다.
+    decay_init: str = "uniform"  # "uniform" = 크기 r~U(r_min,r_max) | "logtau" = log α 균등
     s_max: float = math.pi  # 채널별 순서 위상 스케일 s_j 의 초기 상한
     gate_bias_init: float = -2.0  # 초기 게이트 개방도 (≈0.12)
     driven: bool = True  # False 면 Δθ≡0 → Model 0 과 정확히 동일
@@ -56,6 +61,8 @@ class Model1Config(Model0Config):
     use_wv: bool = False  # value 사영 W_V. span{h} 제약을 풀고 '재표현'을 가능하게 한다
     use_silu_wo: bool = False  # A·V 뒤에 SiLU + W_O. 사이에 비선형이 있어야 W_O 가
     # W_V 와 합쳐지지 않는다 (없으면 f = A h (W_V W_O) 로 d² 자유도에 2d² 파라미터)
+    use_delta: bool = False  # 델타 규칙: S ← ΛS − β k̂(k̂†ΛS) + β k̂ v†.
+    # 키 방향으로 선택적 치환. 대각성이 깨지므로 recurrent 경로 전용.
     polar: bool = False  # 극좌표 사영: z = (W_R h) ⊙ e^{i W_φ h}, W_R·W_φ 는 실수.
     # 진폭이 실수이므로 고정 토큰의 사영 상 {a⊙e^{iφ}: a∈R^p} 가 라그랑지안 부분공간이
     # 된다 (<q,q'> = Σ a_j a'_j 실수 → ω≡0). 초기구상의 구조를 되살리되 φ 를 입력
@@ -91,9 +98,22 @@ class DrivenComplexLinearAttention(nn.Module):
             self.W_im = nn.Parameter(torch.randn(p, d) * std)
             self.W_R = self.W_phi = None
 
-        mag = torch.empty(p).uniform_(cfg.r_min, cfg.r_max)
-        self.alpha_log = nn.Parameter(torch.log(-torch.log(mag)))
-        self.theta = nn.Parameter(torch.empty(p).uniform_(0.0, cfg.theta_max))
+        if getattr(cfg, "decay_init", "uniform") == "logtau":
+            # 시간척도를 로그 균등으로. 크기 r 을 균등 추출하면 반감기 ln2/(-ln r) 이
+            # r→1 에서 폭발해 채널 대부분이 짧은 척도에 몰린다 (U(0.9,0.999) 는
+            # 범위 6.6~693 인데 중앙값이 14). log α 를 균등하게 뿌리면 반감기가
+            # 자릿수마다 고르게 배치된다.
+            a_hi, a_lo = -math.log(cfg.r_min), -math.log(cfg.r_max)
+            self.alpha_log = nn.Parameter(
+                torch.empty(p).uniform_(math.log(a_lo), math.log(a_hi))
+            )
+        else:
+            mag = torch.empty(p).uniform_(cfg.r_min, cfg.r_max)
+            self.alpha_log = nn.Parameter(torch.log(-torch.log(mag)))
+        if getattr(cfg, "ordinal_only", False):
+            self.theta = nn.Parameter(torch.zeros(p), requires_grad=False)
+        else:
+            self.theta = nn.Parameter(torch.empty(p).uniform_(0.0, cfg.theta_max))
 
         psi = (
             torch.zeros(p)
@@ -111,6 +131,9 @@ class DrivenComplexLinearAttention(nn.Module):
         )
         self.s_raw = nn.Parameter(torch.empty(p).uniform_(0.0, cfg.s_max))
         self.gate_bias = nn.Parameter(torch.full((p,), cfg.gate_bias_init))
+
+        # 델타 규칙의 쓰기 강도 β ∈ (0,2). 2 면 하우스홀더 반사(유니터리).
+        self.W_beta = nn.Parameter(torch.randn(d) / math.sqrt(d)) if cfg.use_delta else None
 
         # z 바이어스. 0 초기화 → 학습 시작 시점에는 바이어스 없는 모델과 정확히 동일.
         if cfg.use_bias:
@@ -149,6 +172,8 @@ class DrivenComplexLinearAttention(nn.Module):
         logit = torch.einsum("btd,pd->btp", h, self.W_theta) + self.gate_bias
         if self.cfg.phase_gate == "softplus":
             return torch.nn.functional.softplus(logit)
+        if self.cfg.phase_gate == "hard":
+            return logit.clamp(0.0, 1.0)
         return torch.sigmoid(logit)
 
     def phase_increment(self, h: Tensor) -> Tensor:
@@ -194,6 +219,8 @@ class DrivenComplexLinearAttention(nn.Module):
 
     # ------------------------------------------------------------------ #
     def forward(self, h: Tensor, mode: str = "parallel", return_A: bool = False):
+        if self.cfg.use_delta:
+            mode = "recurrent"
         if mode == "parallel":
             A = self.attention_matrix(h)
             v = h if self.W_V is None else h @ self.W_V
@@ -242,27 +269,38 @@ class DrivenComplexLinearAttention(nn.Module):
             A = A * (self.read_gain / self.read_scale(h, k))
         return A
 
-    def _forward_recurrent(self, h: Tensor) -> Tensor:
+    def _forward_recurrent(self, h: Tensor, return_norm: bool = False) -> Tensor:
         _, q, k = self.project(h)
         omega = self.phase_increment(h)  # (B,T,p)
         B, T, p = q.shape
-        d = h.shape[-1]
 
         v = h if self.W_V is None else h @ self.W_V
         hc = v.to(q.dtype)
         S = q.new_zeros(B, p, v.shape[-1])
         alpha = self.alpha[None, :, None]
-        out = []
+        beta_all = (
+            2.0 * torch.sigmoid(h @ self.W_beta) if self.W_beta is not None else None
+        )
+        out, norms = [], []
         for t in range(T):
             U = torch.polar(torch.exp(-alpha).expand(B, p, 1), omega[:, t].unsqueeze(-1))
-            S = U * S + k[:, t].unsqueeze(-1) * hc[:, t].unsqueeze(1)
+            S = U * S
+            if self.cfg.use_delta:
+                kh = k[:, t] / (k[:, t].norm(dim=-1, keepdim=True) + 1e-6)   # (B,p)
+                u = (kh.conj().unsqueeze(-1) * S).sum(1)                      # (B,d) 저장값
+                bt = beta_all[:, t].unsqueeze(-1).unsqueeze(-1).to(S.dtype)
+                S = S + bt * kh.unsqueeze(-1) * (hc[:, t] - u).unsqueeze(1)   # 오차만 기록
+            else:
+                S = S + k[:, t].unsqueeze(-1) * hc[:, t].unsqueeze(1)
             out.append((q[:, t].conj().unsqueeze(-1) * S).sum(1).real)
+            if return_norm:
+                norms.append(S.norm(dim=(1, 2)).mean().item())
         f = torch.stack(out, dim=1) / math.sqrt(p)
         if self.cfg.read_norm:
             f = f * (self.read_gain / self.read_scale(h, k))
         if self.W_O is not None:
             f = torch.nn.functional.silu(f) @ self.W_O
-        return f
+        return (f, norms) if return_norm else f
 
 
 class Model1(nn.Module):
