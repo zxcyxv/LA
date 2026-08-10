@@ -130,10 +130,21 @@ cfg5 = Model1Config(d=128, p=64, R=4, vocab_size=18)
 m = Model1(cfg5).to(DEV)
 tok = torch.randint(0, 18, (4, 36), device=DEV)
 m(tok).float().pow(2).mean().backward()
+missing = []
 for n, prm in m.named_parameters():
-    ok = prm.grad is not None and torch.isfinite(prm.grad).all()
+    if prm.grad is None:
+        # 이 설정에서 forward 에 안 들어가는 파라미터. 아래 allowlist 로 검사한다.
+        missing.append(n)
+        print(f"  {n:<20} {str(tuple(prm.shape)):<12} {'grad=None':>16}  (이 설정 미사용)")
+        continue
+    ok = bool(torch.isfinite(prm.grad).all())
     print(f"  {n:<20} {str(tuple(prm.shape)):<12} ‖g‖={prm.grad.norm().item():>10.4f}  {ok}")
-    assert ok
+    assert ok, n
+# read_gain 은 read_norm=False 면 forward 에 안 들어가므로 grad 가 없는 것이 정상이다.
+# 그것만 허용하고, 그 밖의 None 은 실제 회귀로 잡는다.
+# (이전 판은 grad=None 에서 AttributeError 로 죽어 §5 이후가 아예 안 돌았다.)
+allowed = {"block.read_gain"}
+assert set(missing) <= allowed, f"예상치 못한 grad=None: {sorted(set(missing) - allowed)}"
 print(f"\n  파라미터: {m.num_parameters()}  (Model 0 대비 +{cfg5.p * cfg5.d + 2 * cfg5.p})")
 
 banner("모든 검증 통과")

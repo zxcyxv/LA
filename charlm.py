@@ -78,7 +78,9 @@ def build(args):
     if args.model == "model1":
         kw.update(tied=not args.untied, use_wv=args.use_wv,
                   use_silu_wo=args.use_silu_wo, use_bias=args.use_bias,
-                  unitary=args.unitary, read_norm=args.read_norm, polar=args.polar)
+                  unitary=args.unitary, read_norm=args.read_norm, polar=args.polar,
+                  psi_inhib=args.psi_inhib, self_exp=args.self_exp,
+                  membrane=args.membrane, gate_write=args.gate_write)
     if args.model == "model1":
         cfg = Model1Config(**kw)
         return Model1(cfg), cfg
@@ -99,6 +101,12 @@ def main():
     ap.add_argument("--use-wv", action="store_true")
     ap.add_argument("--use-silu-wo", action="store_true")
     ap.add_argument("--use-bias", action="store_true")
+    ap.add_argument("--membrane", action="store_true")
+    ap.add_argument("--gate-write", action="store_true")
+    ap.add_argument("--psi-inhib", action="store_true",
+                    help="cos ψ<0 강제 (MISALIGNMENT.md 개입 1)")
+    ap.add_argument("--self-exp", action="store_true",
+                    help="자기항 a_tt 를 지수적으로 적분 (MISALIGNMENT.md 개입 2)")
     ap.add_argument("--polar", action="store_true")
     ap.add_argument("--unitary", action="store_true")
     ap.add_argument("--read-norm", action="store_true")
@@ -132,6 +140,10 @@ def main():
 
     model, cfg = build(args)
     model = model.to(dev)
+    if args.model == 'model1' and args.membrane:
+        xc, _ = get_batch(train, args.T, 64, dev, np.random.default_rng(7))
+        info = model.calibrate_threshold(xc)
+        print(f"문턱 보정: m_std={info['m_std']:.4g}  theta_mean={info['theta_mean']:.4g}")
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     # Adam 의 첫 스텝은 그래디언트와 무관하게 ±lr 만큼 움직인다. W_C 초기 std 는
     # w_scale/sqrt(2d) 라 d 가 클수록 작으므로 상대 교란이 lr·sqrt(d) 로 커지고,

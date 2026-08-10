@@ -8,7 +8,8 @@
 
 문서: [RESULTS.md](RESULTS.md) 전체 기록 · [EXTRAPOLATION.md](EXTRAPOLATION.md) 길이 외삽 ·
 [CAPACITY.md](CAPACITY.md) 용량 · [EXCITABILITY.md](EXCITABILITY.md) 흥분성 ·
-[PLASTICITY.md](PLASTICITY.md) 가소성/STDP · [FIELDS_REVIEW.md](FIELDS_REVIEW.md) 라그랑지안 검토
+[PLASTICITY.md](PLASTICITY.md) 가소성/STDP · [FIELDS_REVIEW.md](FIELDS_REVIEW.md) 라그랑지안 검토 ·
+[MISALIGNMENT.md](MISALIGNMENT.md) 생물학 층위 어긋남 진단
 
 ## 핵심 결과 요약
 
@@ -52,6 +53,8 @@ Model 1:  U_t = exp(-α + i(θ + Δθ(h_t)))     Δθ = s ⊙ sigmoid(W_θ h + b
 | `analyze_selective_copy.py` | 합성 연산자 주소지정 분해, 순서 카운터 프로브 |
 | `analyze_phase.py` | 위상 불변량 원형 통계 (집중도, 각분리, 판별 점수) |
 | `analyze_membrane.py` | 확산/반응 분해, 막전위 해석 검증 |
+| `diag_misalign.py` | 생물학 층위 정합성 진단 (안정 정지점·포화 부호·이산화 안정성·흔적 커널) |
+| `diag_membrane_c.py` | 갈래 C 흥분성 진단 (완화 수렴·문턱하 누적·전부아니면전무·불응기) |
 
 ## 실행
 

@@ -73,7 +73,9 @@ def build(args, task: TaskConfig):
         mcfg = Model1Config(**kw, phase_gate=args.phase_gate, gate_bias_init=args.gate_bias,
                             polar=args.polar, use_wv=args.use_wv,
                             use_delta=args.use_delta, unitary=args.unitary,
-                            decay_init=args.decay_init, ordinal_only=args.ordinal_only)
+                            decay_init=args.decay_init, ordinal_only=args.ordinal_only,
+                            psi_inhib=args.psi_inhib, self_exp=args.self_exp,
+                            membrane=args.membrane, gate_write=args.gate_write)
         return Model1(mcfg), mcfg
     mcfg = Model0Config(**kw)
     if args.model == "model0":
@@ -90,6 +92,14 @@ def main():
                     help="θ:=0 고정. 위치 위상 제거, 내용 주소만으로 학습")
     ap.add_argument("--decay-init", default="uniform", choices=["uniform", "logtau"],
                     help="감쇠 초기화. logtau = 시간척도 로그 균등 (긴 척도 채널 확보)")
+    ap.add_argument("--membrane", action="store_true",
+                    help="갈래 C: t축 막전위 + 문턱 + 깊이축 리셋 (MISALIGNMENT.md §9)")
+    ap.add_argument("--gate-write", action="store_true",
+                    help="스파이크로 S 쓰기를 게이트 (링크 3). --membrane 필요")
+    ap.add_argument("--psi-inhib", action="store_true",
+                    help="cos ψ<0 강제 (MISALIGNMENT.md 개입 1). self-exp 와 함께 쓸 것")
+    ap.add_argument("--self-exp", action="store_true",
+                    help="자기항 a_tt 를 지수적으로 적분 (MISALIGNMENT.md 개입 2)")
     ap.add_argument("--polar", action="store_true")
     ap.add_argument("--use-wv", action="store_true")
     ap.add_argument("--use-delta", action="store_true")
@@ -129,6 +139,12 @@ def main():
     )
     model, mcfg = build(args, task)
     model = model.to(dev)
+
+    if getattr(args, "membrane", False):
+        # 데이터 의존 문턱 보정. m 의 절대 스케일을 모르므로 필수다.
+        xc, _ = make_batch(task, 256, dev)
+        info = model.calibrate_threshold(xc)
+        print(f"문턱 보정: m_std={info['m_std']:.4g}  theta_mean={info['theta_mean']:.4g}")
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.steps)
