@@ -67,6 +67,9 @@ class Mamba3Config:
     use_quadratic: bool = True
     dt_min: float = 1e-3
     dt_max: float = 1e-1
+    a_precedence_bug: bool = False  # True 면 수정 전 동작을 재현한다 (A ≡ +A_floor 상수).
+    # 2026-08-09 의 외삽·용량 측정이 이 상태였으므로, 그 결과를 재현·대조하려면 필요하다.
+    # 연구 목적의 대조군 전용이고 기본값은 항상 False 여야 한다.
 
 
 class Mamba3Layer(nn.Module):
@@ -129,7 +132,10 @@ class Mamba3Layer(nn.Module):
         # clamp 가 먼저 걸린다. heavy_tail 은 항상 양수이므로 전 원소가 -A_floor 로
         # 뭉개지고, 부호를 뒤집으면 A ≡ +A_floor 상수가 된다 — 입력 의존성이 사라지고
         # ADT>0 이 되어 감쇠가 아니라 증폭이 된다. 괄호가 없으면 안 된다.
-        _A = (-heavy_tail(dd_A.float())).clamp(max=-cfg.A_floor)  # (B,T,H)
+        if cfg.a_precedence_bug:
+            _A = -heavy_tail(dd_A.float()).clamp(max=-cfg.A_floor)  # 수정 전 (대조군)
+        else:
+            _A = (-heavy_tail(dd_A.float())).clamp(max=-cfg.A_floor)  # (B,T,H)
         DT = F.softplus(dd_dt + self.dt_bias)  # (B,T,H)
         ADT = _A * DT
 

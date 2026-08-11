@@ -6,6 +6,7 @@
 
 | 파일 | 내용 |
 |---|---|
+| **[CORRECTION_mamba3.md](CORRECTION_mamba3.md)** | **`mamba3_ref.py` 에 연산자 우선순위 버그 — `A` 가 상수가 되어 감쇠가 죽어 있었다. Mamba-3 와의 모든 대조가 무효.** 오늘 가장 중요한 것 |
 | [FORGETTING.md](FORGETTING.md) | 망각 곡선. `MISALIGNMENT §10` 의 "계산도 측정도 하지 않았다" 를 닫는다. **§12~§17 에서 §5·§6 이 뒤집혔으니 머리말의 경고를 먼저 읽을 것** |
 | [RESONANCE.md](RESONANCE.md) | 이 구조는 STDP 가 아니라 **resonate-and-fire** 다. "두 뉴런" 이 어디 있는지 물어서 나온 것 |
 
@@ -45,6 +46,7 @@ python check_stdp_under_C.py  # 갈래 C 가 위상 해석을 깨는지, ~1분
 
 | | |
 |---|---|
+| **`mamba3_ref.py` 의 `A` 계산** | **버그.** 연산자 우선순위로 상수화 + 부호 뒤집힘. `EXTRAPOLATION §6-3`, `RESULTS §7`, `CAPACITY §2·§5` **전부 재측정 필요** |
 | `MISALIGNMENT §5.2` "병렬 뱅크 ≠ 캐스케이드, 차이는 승격 경로" | **반증** — 밀도가 맞으면 병렬 뱅크도 거듭제곱 |
 | `FORGETTING §5·§11-2` "`r_max` 를 넓히면 기억이 길어진다" | **반증** — 수명 80/80/80 |
 | `FORGETTING §6` 처방 "`logtau + γ·τ^{−1}` 로 β 복원" | **철회** — 장기기억엔 β 가 **낮아야** 좋다 |
