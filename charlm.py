@@ -80,7 +80,8 @@ def build(args):
                   use_silu_wo=args.use_silu_wo, use_bias=args.use_bias,
                   unitary=args.unitary, read_norm=args.read_norm, polar=args.polar,
                   psi_inhib=args.psi_inhib, self_exp=args.self_exp,
-                  membrane=args.membrane, gate_write=args.gate_write)
+                  membrane=args.membrane, gate_write=args.gate_write,
+                  ordinal_only=args.ordinal_only)
     if args.model == "model1":
         cfg = Model1Config(**kw)
         return Model1(cfg), cfg
@@ -105,8 +106,10 @@ def main():
     ap.add_argument("--gate-write", action="store_true")
     ap.add_argument("--psi-inhib", action="store_true",
                     help="cos ψ<0 강제 (MISALIGNMENT.md 개입 1)")
+    ap.add_argument("--ordinal-only", action="store_true",
+                    help="정적 위치 위상 θ를 0으로 고정하고 내용 순번 위상만 사용")
     ap.add_argument("--self-exp", action="store_true",
-                    help="자기항 a_tt 를 지수적으로 적분 (MISALIGNMENT.md 개입 2)")
+                    help="자기항 a_tt·h 를 지수 적분; --use-wv/--use-silu-wo 와 호환되지 않음")
     ap.add_argument("--polar", action="store_true")
     ap.add_argument("--unitary", action="store_true")
     ap.add_argument("--read-norm", action="store_true")
@@ -127,6 +130,12 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--save", default=None)
     args = ap.parse_args()
+
+    if args.self_exp and (args.use_wv or args.use_silu_wo):
+        ap.error(
+            "--self-exp는 value=h인 스칼라 자기항에만 정의됩니다. "
+            "W_V 비교는 --self-exp를 빼고 --psi-inhib --use-wv로 실행하세요."
+        )
 
     torch.manual_seed(args.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -173,9 +182,17 @@ def main():
         loss = torch.nn.functional.cross_entropy(
             logits.reshape(-1, 256).float(), y.reshape(-1)
         )
+        if not torch.isfinite(loss):
+            print(f"{step:>7} {'nan':>8} {'nan':>9} {'nan':>11} {'nan':>9} "
+                  f"{time.time() - t0:>7.1f}")
+            print("  비유한 train loss — 즉시 중단")
+            break
         opt.zero_grad(set_to_none=True)
         loss.backward()
         gn = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip).item()
+        if not math.isfinite(gn):
+            print(f"  step {step}: 비유한 gradient norm — optimizer 갱신 전 중단")
+            break
         opt.step()
         sched.step()
 

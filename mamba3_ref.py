@@ -72,6 +72,35 @@ class Mamba3Config:
     # 연구 목적의 대조군 전용이고 기본값은 항상 False 여야 한다.
 
 
+def _causal_decay_matrix(ADT: Tensor) -> Tensor:
+    """안정적인 causal 구간 감쇠 행렬을 만든다.
+
+    ``ADT`` 는 ``(B,T,H)`` 이고 항상 0 이하이다. 순차 재귀에서 시각 ``s`` 에
+    쓰인 값이 ``t`` 에 도달할 때의 감쇠는
+
+        exp(sum_{u=s+1}^t ADT_u)    (s <= t)
+
+    다. 이를 누적합의 차로 곧바로 계산하면 미래 위치 ``s > t`` 에서 양수가
+    생긴다. causal mask 를 나중에 곱할 경우 그 불필요한 ``exp(양수)`` 가 먼저
+    overflow 하고 ``inf * 0 = nan`` 으로 전체 학습을 오염시킬 수 있다.
+
+    여기서는 순차 재귀와 같은 곱을 하삼각 영역에서만 구성한다. 각 스텝 감쇠가
+    ``[0,1]`` 이므로 큰 감쇠는 안전하게 0 으로 underflow 할 뿐 overflow 하지 않는다.
+    """
+    if ADT.ndim != 3:
+        raise ValueError(f"ADT must have shape (B,T,H), got {tuple(ADT.shape)}")
+    B, T, H = ADT.shape
+    step_decay = torch.exp(ADT).transpose(1, 2)  # (B,H,T), 원소는 [0,1]
+    one = ADT.new_ones(B, H, 1)
+    row = one
+    rows = [F.pad(row, (0, T - 1))]
+    for t in range(1, T):
+        # 기존 source 들은 새 시각 t 의 감쇠를 한 번 더 받고, 현재 source 는 1.
+        row = torch.cat((row * step_decay[:, :, t : t + 1], one), dim=-1)
+        rows.append(F.pad(row, (0, T - t - 1)))
+    return torch.stack(rows, dim=-2)  # (B,H,T,T), 상삼각은 처음부터 정확히 0
+
+
 class Mamba3Layer(nn.Module):
     def __init__(self, cfg: Mamba3Config):
         super().__init__()
@@ -153,14 +182,12 @@ class Mamba3Layer(nn.Module):
 
         if self.use_quadratic:
             # Mamba-2 식 이차 dual form. ADT<0 이므로 cumA 는 단조 감소하고
-            # exp(cumA[t]-cumA[n]) ≤ 1 (t≥n) 이라 수치적으로 안전하다.
-            cumA = torch.cumsum(ADT, dim=1)  # (B,T,H)
-            dec = torch.exp(cumA.transpose(1, 2).unsqueeze(-1)
-                            - cumA.transpose(1, 2).unsqueeze(-2))  # (B,H,T,T)
+            # causal 영역의 구간 감쇠는 ≤1 이다. 미래 영역까지 exp 한 뒤 mask 를
+            # 곱하면 불필요한 양의 지수가 overflow 해 inf*0=nan 이 되므로, 안정적인
+            # 하삼각 재귀로 causal 원소만 처음부터 구성한다.
+            dec = _causal_decay_matrix(ADT)
             score = torch.einsum("btn,bsn->bts", Cv, Bv)  # (B,T,T) : query t · key s
-            mask = torch.ones(T, T, device=u.device, dtype=torch.bool).tril()
             w = dec * score.unsqueeze(1) * DT.transpose(1, 2).unsqueeze(-2)
-            w = w * mask
             y = torch.einsum("bhts,bshp->bthp", w, xh)
             y = y + self.D[None, None, :, None] * xh
         else:

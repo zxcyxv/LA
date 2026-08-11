@@ -411,7 +411,12 @@ class Model1(nn.Module):
         if cfg.self_exp and (cfg.use_wv or cfg.use_silu_wo or cfg.use_delta):
             # self_exp 는 f 의 자기항이 정확히 a_tt·h_t 라는 분해에 의존한다.
             # use_wv 면 자기항이 a_tt·(h_t W_V) 이고, use_silu_wo/use_delta 면 A 가 없다.
-            raise ValueError("self_exp 는 use_wv / use_silu_wo / use_delta 와 함께 쓸 수 없다")
+            raise ValueError(
+                "self_exp 는 value=h 인 스칼라 자기항 a_tt·h_t 에만 정의된다. "
+                "use_wv 면 자기항이 a_tt·(h_t W_V) 인 행렬 동역학이므로 함께 쓸 수 없다. "
+                "W_V 실험은 self_exp 를 빼고 psi_inhib + use_wv 로 실행하라. "
+                "use_silu_wo / use_delta 역시 현재 분해와 호환되지 않는다."
+            )
         self.embed = nn.Embedding(cfg.vocab_size, cfg.d)
         nn.init.normal_(self.embed.weight, std=1.0)
         if cfg.tied:
