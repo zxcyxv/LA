@@ -121,7 +121,15 @@ class Mamba3Layer(nn.Module):
         )
         z, x, Bp, Cp, dd_dt, dd_A, _trap, ang = parts
 
-        _A = -heavy_tail(dd_A.float()).clamp(max=-cfg.A_floor)  # (B,T,H)
+        # 부호를 **먼저** 뒤집고 그 다음에 clamp 한다. 공식 구현이 두 문장으로 나눠
+        # 쓴 이유가 이것이다 (mamba_ssm/modules/mamba3.py):
+        #     _A = -heavy_tail_activation(dd_A.to(torch.float32))
+        #     _A = torch.clamp(_A, max=-self.A_floor)
+        # 한 줄로 `-heavy_tail(x).clamp(max=-A_floor)` 라 쓰면 파이썬 우선순위상
+        # clamp 가 먼저 걸린다. heavy_tail 은 항상 양수이므로 전 원소가 -A_floor 로
+        # 뭉개지고, 부호를 뒤집으면 A ≡ +A_floor 상수가 된다 — 입력 의존성이 사라지고
+        # ADT>0 이 되어 감쇠가 아니라 증폭이 된다. 괄호가 없으면 안 된다.
+        _A = (-heavy_tail(dd_A.float())).clamp(max=-cfg.A_floor)  # (B,T,H)
         DT = F.softplus(dd_dt + self.dt_bias)  # (B,T,H)
         ADT = _A * DT
 
